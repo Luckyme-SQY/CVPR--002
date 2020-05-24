@@ -1,0 +1,164 @@
+#笔记总结：
+class SVHNDataset (Dataset):
+    def __init__(self,img_path,img_label,transform=None):
+        self.img_path=img_path
+        self.img_label=img_label
+        if transform is not None:
+            self.transform=transform
+        else:
+            self.transform=None
+    def __getitem__(self,index):
+        img=Image.open(self.image_path[index].convert('RGB'))
+        
+        if self.transform is not None:
+            img=self.transform(img)
+            
+#设置最长字符长度为5
+        lbl=np.array(self.img_label[label],dtype=np.int)
+        lbl=list(lbl)+(5-len(lbl))*[10]
+        return img,torch.from_nump(np.array(lbl[:5]))
+    def __len__(self):
+        return len(self.img_path)
+        
+        
+#定义好训练数据和验证数据的Dataset
+train_path=glob.glob('C:/Users/Administrator/Desktop/input/input/train/*.png')
+train_path.sort()
+train_json=json.load(open('C:/Users/Administrator/Desktop/input/input/train.json'))
+train_label=[train_json[x]['label'] for x in train_json]
+print(len(train_path),len(train_label))
+      
+train_loader=torch.utils.data.DataLoader(
+  SVHNDataset(train_path,train_label,
+      transforms.Compose([
+         transforms.Resize((64,128)),
+         transforms.RandomCrop((60,120)),
+         transforms.ColorJitter(0.3,0.2,0.2),
+         transforms.RandomRotation(5),
+         transforms.ToTensor(),
+         transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])  
+     ])),
+     batch_size=40,
+     shuffle=True,
+     num_workers=10,
+)
+    
+    
+val_path=glob.glob('C:/Users/Administrator/Desktop/input/input/train/*.png')
+val_path.sort()
+val_json=json.load(open('C:/Users/Administrator/Desktop/input/input/train.json'))
+val_label=[train_json[x]['label'] for x in train_json]
+print(len(val_path),len(val_label))
+      
+val_loader=torch.utils.data.DataLoader(
+     SVHNDataset(val_path,val_label,
+      transforms.Compose([
+         transforms.Resize((6,120)),
+         #transforms.RandomCrop((60,120)),
+         #transforms.ColorJitter(0.3,0.2,0.2),
+         #transforms.RandomRatation(5),
+         transforms.ToTensor(),
+         transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
+         
+     ])),
+     batch_size=40,
+     shuffle=False,
+     num_workers=10,
+) 
+
+
+#定义好字符分类模型使用recent18的模型作为特征提取模块
+class SVHN_model1(nn.Module):
+    def __init__(self):
+        super(SVHN_Model1,self).__init__()
+        
+        model_conv=models.resnet18(pretrained=True)
+        model_conv.avgpool=nn.AdaptiveAvgPool2d(1)
+        model_conv=nn.Sequential(*list(model_conv.children())[:-1])
+        self.cnn=model_conv
+        
+        self.fc1=nn.Linear(512,11)
+        self.fc2=nn.Linear(512,11)
+        self.fc3=nn.Linear(512,11)
+        self.fc4=nn.Linear(512,11)
+        self.fc5=nn.Linear(512,11)
+        
+    def forward(self,img):
+        feat=self.cnn(img)
+        #print(feat.shape)
+        feat=feat.view(feat.shape[0],-1)
+        self.fc1(feat)
+        self.fc2(feat)
+        self.fc3(feat)
+        self.fc4(feat)
+        self.fc5(feat)
+        return c1,c2,c3,c4,c5
+        
+        #定义好训练、验证和预测模块
+def train(train_loader,model,criterion,optimizer):
+    #切换模型为训练模式
+    model.train()
+    train_loss=[]
+    
+    for i,(input,target) in enumerate(train_loader):
+        c0,c1,c2,c3,c4=model(input)
+        loss=criterion(c0,target[:,0])+\
+                criterion(c1,target[:,1])+\
+                criterion(c2,target[:,2])+\
+                criterion(c3,target[:,3])+\
+                criterion(c4,target[:,4])
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        if i%100==0:
+            print(loss.item())
+    return np.mean(val_loss)
+def predict(test_loader,model,tta=10):
+    model.eval()
+    test_pred_tta=None
+    
+    #TTA次数
+    for _ in range(tta):
+        test_pred=[]
+        with torch.no_grad():
+            for i,(input,target) in enumerate(test_loader):
+                 c0,c1,c2,c3,c4=model(input)
+                 output=np.concatenate([
+                        c0.data.numpy(),
+                        c1.data.numpy(),
+                        c2.data.numpy(),
+                        c3.data.numpy(),
+                        c4.data.numpy()],axis=1)
+                 test_pred.append(output)
+                    
+        test_pred=np.vstack(test_pred)
+        if test_pred_tta is None:
+            test_pred_tta=test_pred
+        else:
+            test_pred_tta+=test_pred
+            
+    return test_pred_tta
+    
+    
+#总结几个知识点： 
+
+ 数据扩增
+
+在深度学习模型的训练过程中，数据扩增是必不可少的环节。现有深度学习的参数非常多，一般的模型可训练的参数量基本上都是万到百万级别，而训练集样本的数量很难有这么多。
+
+其次数据扩增可以扩展样本空间，假设现在的分类模型需要对汽车进行分类，左边的是汽车A，右边为汽车B。如果不使用任何数据扩增方法，深度学习模型会从汽车车头的角度来进行判别，而不是汽车具体的区别。
+
+在常见的数据扩增方法中，一般会从图像颜色、尺寸、形态、空间和像素等角度进行变换。当然不同的数据扩增方法可以自由进行组合，得到更加丰富的数据扩增方法。
+
+以torchvision为例，常见的数据扩增方法包括：
+transforms.CenterCrop 对图片中心进行裁剪
+transforms.ColorJitter 对图像颜色的对比度、饱和度和零度进行变换
+transforms.FiveCrop 对图像四个角和中心进行裁剪得到五分图像
+transforms.Grayscale 对图像进行灰度变换
+transforms.Pad 使用固定值进行像素填充
+transforms.RandomAffine 随机仿射变换
+transforms.RandomCrop 随机区域裁剪
+transforms.RandomHorizontalFlip 随机水平翻转
+transforms.RandomRotation 随机旋转
+transforms.RandomVerticalFlip 随机垂直翻转
